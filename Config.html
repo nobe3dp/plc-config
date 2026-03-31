@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>XIAO C6 PLC Configuration</title>
-    <script src="https://cdnjs.cloudflare.com"></script>
+    <script src="https://cloudflare.com"></script>
     <style>
         :root {
             --sysmac-dark: #2d3436;    /* ヘッダー・テキスト */
@@ -59,6 +59,7 @@
             background: #f1f2f6; padding: 10px; border-top: 1px solid var(--sysmac-border);
             font-size: 0.8rem; text-align: left; color: #636e72;
             display: flex; align-items: center; gap: 8px;
+            min-height: 20px;
         }
     </style>
 </head>
@@ -72,19 +73,19 @@
         <div class="content">
             <div class="group">
                 <label>Communication: WiFi SSID</label>
-                <input type="text" id="ssid" spellcheck="false">
+                <input type="text" id="ssid" spellcheck="false" autocomplete="off">
             </div>
             <div class="group">
                 <label>Security: Password</label>
-                <input type="password" id="pass">
+                <input type="password" id="pass" autocomplete="off">
             </div>
             <div class="group">
                 <label>Ethernet: PLC IP Address</label>
-                <input type="text" id="ip" placeholder="192.168.1.1">
+                <input type="text" id="ip" placeholder="192.168.1.1" autocomplete="off">
             </div>
             <div class="group">
                 <label>Variable: Device No (D-Register)</label>
-                <input type="number" id="dev" value="500">
+                <input type="number" id="dev" value="500" autocomplete="off">
             </div>
 
             <div class="btn-stack">
@@ -101,57 +102,88 @@
 
     <script>
         lucide.createIcons();
+
+        // XIAO側の設定と一文字も違わず一致させること
         const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-
-        async function getChar() {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ name: "XIAO_C6_PLC_CONFIG" }],
-                optionalServices: [SERVICE_UUID]
-            });
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(SERVICE_UUID);
-            return await service.getCharacteristic(CHARACTERISTIC_UUID);
-        }
+        const DEVICE_NAME = "XIAO_C6_PLC_CONFIG";
 
         const setStatus = (msg, color = "#636e72") => {
             const txt = document.getElementById('statusText');
             txt.innerText = msg;
             txt.parentElement.style.color = color;
+            console.log("Status:", msg);
         };
 
+        async function getCharacteristic() {
+            setStatus("Requesting Bluetooth Device...");
+            
+            // Web Bluetoothの探索条件
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: DEVICE_NAME }],
+                optionalServices: [SERVICE_UUID]
+            });
+
+            setStatus("Connecting to GATT Server...");
+            const server = await device.gatt.connect();
+
+            setStatus("Getting Service...");
+            const service = await server.getPrimaryService(SERVICE_UUID);
+
+            setStatus("Getting Characteristic...");
+            return await service.getCharacteristic(CHARACTERISTIC_UUID);
+        }
+
+        // --- 設定読み込み処理 ---
         document.getElementById('readBtn').addEventListener('click', async () => {
             try {
-                setStatus("Searching...");
-                const char = await getChar();
+                const char = await getCharacteristic();
+                
+                setStatus("Reading Value...");
                 const value = await char.readValue();
                 const str = new TextDecoder().decode(value);
-                const [ssid, pass, ip, dev] = str.split(',');
                 
-                document.getElementById('ssid').value = ssid || "";
-                document.getElementById('pass').value = pass || "";
-                document.getElementById('ip').value = ip || "";
-                document.getElementById('dev').value = dev || "";
-                
-                setStatus("Read Success", "#27ae60");
-            } catch (e) { setStatus("Error: " + e.message, "#d63031"); }
+                // カンマ区切りデータを分割
+                const parts = str.split(',');
+                if (parts.length >= 4) {
+                    document.getElementById('ssid').value = parts[0];
+                    document.getElementById('pass').value = parts[1];
+                    document.getElementById('ip').value   = parts[2];
+                    document.getElementById('dev').value  = parts[3];
+                    setStatus("Read Success", "#27ae60");
+                } else {
+                    setStatus("Invalid Data Format", "#d63031");
+                }
+            } catch (e) {
+                setStatus("Error: " + e.message, "#d63031");
+            }
         });
 
+        // --- 設定書き込み処理 ---
         document.getElementById('writeBtn').addEventListener('click', async () => {
             try {
-                const sendText = [
-                    document.getElementById('ssid').value,
-                    document.getElementById('pass').value,
-                    document.getElementById('ip').value,
-                    document.getElementById('dev').value
-                ].join(',');
+                const ssid = document.getElementById('ssid').value;
+                const pass = document.getElementById('pass').value;
+                const ip   = document.getElementById('ip').value;
+                const dev  = document.getElementById('dev').value;
 
-                setStatus("Connecting...");
-                const char = await getChar();
-                await char.writeValue(new TextEncoder().encode(sendText));
+                if (!ssid || !pass || !ip || !dev) {
+                    alert("すべての項目を入力してください");
+                    return;
+                }
+
+                const sendText = `${ssid},${pass},${ip},${dev}`;
                 
-                setStatus("Transfer Complete - Rebooting", "#27ae60");
-            } catch (e) { setStatus("Error: " + e.message, "#d63031"); }
+                const char = await getCharacteristic();
+                
+                setStatus("Transferring Data...");
+                const encoder = new TextEncoder();
+                await char.writeValue(encoder.encode(sendText));
+                
+                setStatus("Transfer Complete - Rebooting ESP", "#27ae60");
+            } catch (e) {
+                setStatus("Error: " + e.message, "#d63031");
+            }
         });
     </script>
 </body>
