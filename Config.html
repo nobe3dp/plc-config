@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XIAO C6 PLC Configuration</title>
+    <script src="https://cdnjs.cloudflare.com"></script>
+    <style>
+        :root {
+            --sysmac-dark: #2d3436;    /* ヘッダー・テキスト */
+            --sysmac-bg: #e0e4e7;      /* 背景グレー */
+            --sysmac-card: #f5f7f9;    /* カード背景 */
+            --sysmac-accent: #f39c12;  /* オムロンオレンジ風 */
+            --sysmac-blue: #2c3e50;    /* プライマリボタン */
+            --sysmac-border: #bdc3c7;
+        }
+        body {
+            background-color: var(--sysmac-bg); color: var(--sysmac-dark);
+            font-family: 'Segoe UI', 'Meiryo', sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; margin: 0;
+        }
+        .container {
+            background: var(--sysmac-card); padding: 0; border-radius: 4px;
+            width: 100%; max-width: 420px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            border: 1px solid var(--sysmac-border); overflow: hidden;
+        }
+        .header {
+            background: var(--sysmac-blue); color: white;
+            padding: 12px 20px; font-size: 1rem; font-weight: bold;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .content { padding: 25px; }
+        .group { margin-bottom: 15px; }
+        label { 
+            display: block; font-size: 0.8rem; font-weight: bold;
+            margin-bottom: 5px; color: #4b5563; text-transform: uppercase;
+        }
+        input {
+            width: 100%; padding: 10px; border-radius: 2px; border: 1px solid var(--sysmac-border);
+            background: white; color: var(--sysmac-dark); font-size: 1rem; box-sizing: border-box;
+        }
+        input:focus { outline: 2px solid var(--sysmac-accent); border-color: transparent; }
+        
+        .btn-stack { display: flex; gap: 8px; margin-top: 25px; }
+        button {
+            flex: 1; padding: 12px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.1);
+            font-weight: bold; cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            font-size: 0.9rem;
+        }
+        #readBtn { background: #dcdde1; color: var(--sysmac-dark); }
+        #readBtn:hover { background: #ced6e0; }
+        
+        #writeBtn { background: var(--sysmac-accent); color: white; }
+        #writeBtn:hover { background: #e67e22; filter: brightness(1.1); }
+        
+        #status {
+            background: #f1f2f6; padding: 10px; border-top: 1px solid var(--sysmac-border);
+            font-size: 0.8rem; text-align: left; color: #636e72;
+            display: flex; align-items: center; gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <i data-lucide="settings-2" size="18"></i>
+            XIAO C6 Configuration Tool
+        </div>
+        
+        <div class="content">
+            <div class="group">
+                <label>Communication: WiFi SSID</label>
+                <input type="text" id="ssid" spellcheck="false">
+            </div>
+            <div class="group">
+                <label>Security: Password</label>
+                <input type="password" id="pass">
+            </div>
+            <div class="group">
+                <label>Ethernet: PLC IP Address</label>
+                <input type="text" id="ip" placeholder="192.168.1.1">
+            </div>
+            <div class="group">
+                <label>Variable: Device No (D-Register)</label>
+                <input type="number" id="dev" value="500">
+            </div>
+
+            <div class="btn-stack">
+                <button id="readBtn"><i data-lucide="download"></i> Read from ESP</button>
+                <button id="writeBtn"><i data-lucide="upload"></i> Transfer to ESP</button>
+            </div>
+        </div>
+        
+        <div id="status">
+            <i data-lucide="info" size="14"></i>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+        async function getChar() {
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: "XIAO_C6_PLC_CONFIG" }],
+                optionalServices: [SERVICE_UUID]
+            });
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            return await service.getCharacteristic(CHARACTERISTIC_UUID);
+        }
+
+        const setStatus = (msg, color = "#636e72") => {
+            const txt = document.getElementById('statusText');
+            txt.innerText = msg;
+            txt.parentElement.style.color = color;
+        };
+
+        document.getElementById('readBtn').addEventListener('click', async () => {
+            try {
+                setStatus("Searching...");
+                const char = await getChar();
+                const value = await char.readValue();
+                const str = new TextDecoder().decode(value);
+                const [ssid, pass, ip, dev] = str.split(',');
+                
+                document.getElementById('ssid').value = ssid || "";
+                document.getElementById('pass').value = pass || "";
+                document.getElementById('ip').value = ip || "";
+                document.getElementById('dev').value = dev || "";
+                
+                setStatus("Read Success", "#27ae60");
+            } catch (e) { setStatus("Error: " + e.message, "#d63031"); }
+        });
+
+        document.getElementById('writeBtn').addEventListener('click', async () => {
+            try {
+                const sendText = [
+                    document.getElementById('ssid').value,
+                    document.getElementById('pass').value,
+                    document.getElementById('ip').value,
+                    document.getElementById('dev').value
+                ].join(',');
+
+                setStatus("Connecting...");
+                const char = await getChar();
+                await char.writeValue(new TextEncoder().encode(sendText));
+                
+                setStatus("Transfer Complete - Rebooting", "#27ae60");
+            } catch (e) { setStatus("Error: " + e.message, "#d63031"); }
+        });
+    </script>
+</body>
+</html>
